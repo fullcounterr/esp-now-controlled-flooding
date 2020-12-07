@@ -44,6 +44,9 @@ uint8_t mac[6];
 // time since clearing flooding table
 long lastClear = 0;
 
+// time since last print table
+long lastPrint = 0;
+
 // Init ESP Now with fallback
 void InitESPNow() {
   if (esp_now_init() == ESP_OK) {
@@ -124,13 +127,14 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
   mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
   Serial.print("Last Packet Sent to: "); Serial.println(macStr);
-  Serial.print("Last Packet Sent id: "); Serial.println(send.type);
+  Serial.print("Last Packet Sent id: "); Serial.println(send.id);
   Serial.print("Last Packet Send Status: "); Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
 
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
-  memcpy(&receive, data, sizeof(data)); // copy received data to struct receive
+  memcpy(&receive, data, sizeof(receive)); // copy received data to struct receive
   Serial.print("Size of receive :"); Serial.println(sizeof(receive));
+  Serial.print("ID :"); Serial.println(receive.id);
   ////////   Cek MAC Penerima   ///////////
   char sndStr[18]; // mac sender di packet
   char rcvStr[18]; // mac receiver di packet
@@ -150,6 +154,7 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
   if (checkTable(receive.id)){
     Serial.println("Received packet that have been received before, dropping packet...");
   } else { // if id is not in table then process it
+    fillTable(sndStr, receive.id); // record packet id
     if (receive.type == 1){
       Serial.println("RTS packet received, sending CTS....");
       sendCts(receive);
@@ -165,8 +170,7 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
     // accept data?
     if (receive.type == 4){
       Serial.println("Data packet received");
-      Serial.println("From :");
-      Serial.println("Data :");
+      Serial.print("From :");Serial.println(sndStr);
       Serial.println("Data received. Sending back ACK...");
       sendAck(receive);
     } 
@@ -242,12 +246,12 @@ void sendAck(packet receive){
 void fillTable(char senderMac[18], String packetID){
   for(int x=0; x<20; x++) {
     if(x < 19){
-      if(knownPacket[x].senderMac == ""){
+      if(knownPacket[x].senderMac == NULL){
         knownPacket[x] = (record_type) {senderMac,packetID};
         return;
       }
     } else {
-      if(knownPacket[x].senderMac == ""){
+      if(knownPacket[x].senderMac == NULL){
         knownPacket[x] = (record_type) {senderMac,packetID};
       } else {
         clearTable();
@@ -257,14 +261,24 @@ void fillTable(char senderMac[18], String packetID){
   }
 }
 
-// check if packet id already received
-bool checkTable(String packetID){
+
+void printTable(){
+  Serial.print("MAC "); Serial.println("ID");
   for(int x=0; x<20; x++) {
-    if(knownPacket[x].packetID == packetID){
-      return false; // false if packet already received
+    if(knownPacket[x].packetID != NULL){
+      Serial.print(knownPacket[x].senderMac); Serial.println(knownPacket[x].packetID);
     }
   }
-  return true;
+}
+
+// check if packet id already received
+bool checkTable(String id){
+  for(int x=0; x<20; x++) {
+    if(knownPacket[x].packetID.equals(id)){
+      return true;
+    }
+  }
+  return false;
 }
 
 // clear table if time is >10 second
@@ -277,8 +291,8 @@ void clearTable(){
       knownPacket[x].senderMac = knownPacket[x+1].senderMac;
       knownPacket[x].packetID = knownPacket[x+1].packetID;
     } else {
-      knownPacket[x].senderMac = "";
-      knownPacket[x].packetID = "";
+      knownPacket[x].senderMac == NULL;
+      knownPacket[x].packetID == NULL;
     }
   }
 }
@@ -316,6 +330,10 @@ void loop() {
   if (millis() - lastClear > 10000) {
     clearTable();
     lastClear = millis(); // timestamp the message
+  }
+  if (millis() - lastPrint > 10000){
+    printTable();
+    lastPrint = millis();
   }
   delay(1000);
 }
