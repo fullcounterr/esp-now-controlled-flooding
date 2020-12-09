@@ -12,7 +12,7 @@ esp_now_peer_info_t slave;
 // Init struktur data packet
 // Init struktur data packet
 typedef struct  packet {
-  String id; // id paket alphanumeric
+  uint16_t id; // id paket alphanumeric
   uint8_t type; // tipe paket, 1 rts, 2 cts, 3 ack, 4 data
   uint8_t sender[6]; // sender mac 
   uint8_t receiver[6]; // receiver mac
@@ -22,7 +22,7 @@ typedef struct  packet {
 
 // struct for controlled flooding table
 typedef struct {
-  String packetID;
+  uint16_t packetID;
   String senderMac;
 } record_type;
 record_type knownPacket[20];
@@ -160,6 +160,8 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
 
   // accept cts?
   if (checkTable(receive.id)){
+    Serial.println("Received packet that have been received before, dropping packet...");
+  } else {
     fillTable(sndStr, receive.id); // record packet id
     if (receive.type == 1){
       Serial.println("RTS packet received, re-broadcasting....");
@@ -228,7 +230,7 @@ void sendData(packet send) {
 void sendRts(){
   float a = 0;  // 0 data for rts
   float b = 0;  // 0 data for rts
-  send.id = "ABC123";  // generate random packet id
+  send.id = 14141;  // generate random packet id
   send.type = 1; // rts
   float data[2] = {a, b}; 
   memcpy(send.sender, mac, sizeof(mac)); // gateway ip for rts
@@ -243,7 +245,7 @@ void sendRts(){
 void sendCurrent (){
   float a = rand() % 10;  // random data for now
   float b = rand() % 11+100;  // random data for now
-  send.id = randString(6); // random id 
+  send.id = randInt(); // random id 
   send.type = 4; // data
   float data[2] = {a, b};
   memcpy(send.sender, mac, sizeof(mac)); // gateway ip for rts
@@ -256,32 +258,34 @@ void sendCurrent (){
 
 
 // fill table with received packet id
-void fillTable(String senderMac,String packetID){
+void fillTable(char senderMac[18], uint16_t packetID){
   for(int x=0; x<20; x++) {
     if(x < 19){
       if(knownPacket[x].senderMac == NULL){
-        knownPacket[x] = (record_type) {senderMac,packetID};
+        knownPacket[x] = (record_type) {packetID,senderMac};
         return;
       }
     } else {
       if(knownPacket[x].senderMac == NULL){
-        knownPacket[x] = (record_type) {senderMac,packetID};
+        knownPacket[x] = (record_type) {packetID,senderMac};
       } else {
         clearTable();
-        knownPacket[x] = (record_type) {senderMac,packetID};
+        knownPacket[x] = (record_type) {packetID,senderMac};
       }
     }
   }
 }
 
 // check if packet id already received
-bool checkTable(String packetID){
+bool checkTable(uint16_t packetID){
   for(int x=0; x<20; x++) {
     if(knownPacket[x].packetID == packetID){
+      return true;
+    } else {
       return false;
     }
   }
-  return true;
+  return false;
 }
 
 void printTable(){
@@ -310,17 +314,11 @@ void clearTable(){
 }
 
 // random alphanumeric for packet id
-String randString(const int len){
-  String tmp_s;
-  static const char alphanum[] =
-        "0123456789"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "abcdefghijklmnopqrstuvwxyz";
-  srand( (unsigned) time(NULL) * getpid());
-    tmp_s.reserve(len);
-    for (int i = 0; i < len; ++i) 
-        tmp_s += alphanum[rand() % (sizeof(alphanum) - 1)];
-    return tmp_s;
+uint16_t randInt(){
+  uint16_t tmp_s;
+  srand(time(NULL));   // Initialization, should only be called once.
+  tmp_s = rand();
+  return tmp_s;
 }
 
 void setup() {
@@ -333,7 +331,7 @@ void setup() {
   InitESPNow();
   esp_now_register_send_cb(OnDataSent);
   esp_now_register_recv_cb(OnDataRecv);
-
+  srand(time(NULL));
   // add a broadcast peer
   initBroadcastSlave();
 }
