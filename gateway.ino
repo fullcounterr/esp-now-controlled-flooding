@@ -11,7 +11,7 @@ esp_now_peer_info_t slave;
 
 // Init struktur data packet
 typedef struct  packet {
-  uint16_t id; // id paket alphanumeric
+  char id[6]; // id paket alphanumeric
   uint8_t type; // tipe paket, 1 rts, 2 cts, 3 ack, 4 data
   uint8_t sender[6]; // sender mac 
   uint8_t receiver[6]; // receiver mac
@@ -21,7 +21,7 @@ typedef struct  packet {
 
 // struct for controlled flooding table
 typedef struct {
-  uint16_t packetID;
+  char packetID[6];
   String senderMac;
 } record_type;
 record_type knownPacket[20];
@@ -36,7 +36,7 @@ packet receive;
 bool cts = false;
 
 // Init mac receiver
-uint8_t receiver[] = {0x30, 0xAE, 0xA4, 0x9B, 0xFA, 0xB8}; // mac gateway
+uint8_t receiver[] = {0x30, 0xAE, 0xA4, 0x97, 0xA4, 0xA4}; // mac gateway
   
 // Init mac untuk simpan mac kita
 uint8_t mac[6];
@@ -46,6 +46,12 @@ long lastClear = 0;
 
 // time since last print table
 long lastPrint = 0;
+
+// alphanum
+static const char alphanum[] =
+        "0123456789"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz";
 
 // Init ESP Now with fallback
 void InitESPNow() {
@@ -123,18 +129,17 @@ bool manageSlave() {
 }
 
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  char macStr[18];
-  snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
-  mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-  Serial.print("Last Packet Sent to: "); Serial.println(macStr);
-  Serial.print("Last Packet Sent id: "); Serial.println(send.id);
-  Serial.print("Last Packet Send Status: "); Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+
 }
 
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
   memcpy(&receive, data, sizeof(receive)); // copy received data to struct receive
-  Serial.print("Size of receive :"); Serial.println(sizeof(receive));
-  Serial.print("ID :"); Serial.println(receive.id);
+  Serial.println("==================="); 
+  Serial.print("ID :");
+  for(int i=0; i<6; i++) {
+        Serial.print(receive.id[i]);
+      }   
+  Serial.println(""); 
   ////////   Cek MAC Penerima   ///////////
   char sndStr[18]; // mac sender di packet
   char rcvStr[18]; // mac receiver di packet
@@ -161,11 +166,11 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
     } 
     // accept cts?
     if (receive.type == 2 ) {
-      Serial.println("Received CTS, this should not happen....");
+      Serial.println("Received CTS, ignoring....");
     }
     // accept ack?
     if (receive.type == 3) {
-      Serial.print("Received ACK, this should not happen....");
+      Serial.println("Received ACK, ignoring....");
     }
     // accept data?
     if (receive.type == 4){
@@ -175,11 +180,13 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
       sendAck(receive);
     } 
   }
+  Serial.println("==================="); 
   
 }
 
 void sendData(packet send) {
   const uint8_t *peer_addr = slave.peer_addr;
+  Serial.println("==================="); 
   Serial.print("Type: "); 
   Serial.println(send.type);
   Serial.print("Sending: "); 
@@ -190,6 +197,10 @@ void sendData(packet send) {
   Serial.print("Send Status: ");
   if (result == ESP_OK) {
     Serial.println("Success");
+    char sndStr[18];
+    snprintf(sndStr, sizeof(sndStr), "%02x:%02x:%02x:%02x:%02x:%02x",
+  send.sender[0], send.sender[1], send.sender[2], send.sender[3], send.sender[4], send.sender[5]);
+    fillTable(sndStr, send.id); // record packet id
   }
   else if (result == ESP_ERR_ESPNOW_NOT_INIT) {
     // How did we get so far!!
@@ -210,29 +221,19 @@ void sendData(packet send) {
   else {
     Serial.println("Not sure what happened");
   }
+  Serial.println("==================="); 
 }
 
 // kirim cts
 void sendCts(packet receive){
   float a = 0;  // 0 data for rts
   float b = 0;  // 0 data for rts
-  send.id = randInt();  // generate random packet id
+  char tmp_id[6];
+  for (int i = 0; i < 6; ++i) {
+        tmp_id[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
+  }
+  memcpy(send.id, tmp_id, sizeof(send.id)); // our mac
   send.type = 2; // cts
-  float data[2] = {a, b}; 
-  memcpy(send.sender, mac, sizeof(mac)); // our mac
-  memcpy(send.receiver, receive.sender, sizeof(receive.sender)); // packet receiver mac
-  memcpy(send.data, data, sizeof(data)); // 0 data
-  send.time = 0;
-  Serial.print("Size of CTS :"); Serial.println(sizeof(send));
-  sendData(send); // send packet
-}
-
-// kirim ack
-void sendAck(packet receive){
-  float a = 0;  // 0 data for ack
-  float b = 0;  // 0 data for ack
-  send.id = randInt();  // generate random packet id
-  send.type = 3; // ack
   float data[2] = {a, b}; 
   memcpy(send.sender, mac, sizeof(mac)); // our mac
   memcpy(send.receiver, receive.sender, sizeof(receive.sender)); // packet receiver mac
@@ -242,20 +243,42 @@ void sendAck(packet receive){
   sendData(send); // send packet
 }
 
+// kirim ack
+void sendAck(packet receive){
+  float a = 0;  // 0 data for ack
+  float b = 0;  // 0 data for ack
+  char tmp_id[6];
+  for (int i = 0; i < 6; ++i) {
+        tmp_id[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
+  }
+  memcpy(send.id, tmp_id, sizeof(send.id)); // our mac
+  send.type = 3; // ack
+  float data[2] = {a, b}; 
+  memcpy(send.sender, mac, sizeof(mac)); // our mac
+  memcpy(send.receiver, receive.sender, sizeof(receive.sender)); // packet receiver mac
+  memcpy(send.data, data, sizeof(data)); // 0 data
+  send.time = 5;
+  Serial.print("Size of ACK :"); Serial.println(sizeof(send));
+  sendData(send); // send packet
+}
+
 // fill table with received packet id
-void fillTable(char senderMac[18], uint16_t packetID){
+void fillTable(char senderMac[18], char packetID[6]){
   for(int x=0; x<20; x++) {
     if(x < 19){
       if(knownPacket[x].senderMac == NULL){
-        knownPacket[x] = (record_type) {packetID,senderMac};
+        knownPacket[x].senderMac = senderMac;
+        memcpy(knownPacket[x].packetID, packetID, sizeof(knownPacket[x].packetID)); 
         return;
       }
     } else {
       if(knownPacket[x].senderMac == NULL){
-        knownPacket[x] = (record_type) {packetID,senderMac};
+        knownPacket[x].senderMac = senderMac;
+        memcpy(knownPacket[x].packetID, packetID, sizeof(knownPacket[x].packetID)); 
       } else {
         clearTable();
-        knownPacket[x] = (record_type) {packetID,senderMac};
+        memcpy(knownPacket[x].packetID, packetID, sizeof(knownPacket[x].packetID)); 
+        knownPacket[x].senderMac = senderMac;
       }
     }
   }
@@ -265,19 +288,28 @@ void fillTable(char senderMac[18], uint16_t packetID){
 void printTable(){
   Serial.print("MAC "); Serial.println("ID");
   for(int x=0; x<20; x++) {
-    if(knownPacket[x].packetID != NULL){
-      Serial.print(knownPacket[x].senderMac); Serial.println(knownPacket[x].packetID);
+    if(knownPacket[x].packetID[x] != NULL && knownPacket[x].packetID[x] != '0'){
+      Serial.print(knownPacket[x].senderMac); Serial.print(" | "); 
+      for(int i=0; i<6; i++) {
+        Serial.print(knownPacket[x].packetID[i]);
+      }
+      Serial.println("");     
     }
   }
+  
 }
 
 // check if packet id already received
-bool checkTable(uint16_t id){
+bool checkTable(char id[6]){
   for(int x=0; x<20; x++) {
-    if(knownPacket[x].packetID == id){
+    uint8_t match = 0;
+    for(int i=0; i<6; i++) {
+      if (knownPacket[x].packetID[i] == id[i]){
+        match++;
+      }
+    }
+    if (match == 6){
       return true;
-    } else {
-      return false;
     }
   }
   return false;
@@ -291,7 +323,7 @@ void clearTable(){
         return;
       }
       knownPacket[x].senderMac = knownPacket[x+1].senderMac;
-      knownPacket[x].packetID = knownPacket[x+1].packetID;
+      memcpy(knownPacket[x].packetID, knownPacket[x+1].packetID, sizeof(knownPacket[x].packetID));
     } else {
       knownPacket[x].senderMac == NULL;
       knownPacket[x].packetID == NULL;
@@ -299,13 +331,6 @@ void clearTable(){
   }
 }
 
-// random alphanumeric for packet id
-uint16_t randInt(){
-  uint16_t tmp_s;
-   // Initialization, should only be called once.
-  tmp_s = rand();
-  return tmp_s;
-}
 
 void setup() {
   Serial.begin(115200);
