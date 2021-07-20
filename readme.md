@@ -1,1 +1,0 @@
-This is my final project for my bachelor degree.
